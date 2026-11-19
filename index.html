@@ -1,0 +1,650 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gold Miner - Multi Level</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 12px;
+    background: #172b38;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+
+h1 {
+    color: #ffd54a;
+    margin: 12px;
+}
+
+#info {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 20px;
+    font-size: 17px;
+    margin: 15px;
+}
+
+#info span {
+    background: #294453;
+    padding: 10px 14px;
+    border-radius: 8px;
+}
+
+canvas {
+    width: 100%;
+    max-width: 800px;
+    background: linear-gradient(
+        #8bd5ef 0%,
+        #f2d59c 65%,
+        #98602c 65%
+    );
+    border: 4px solid #e9bb45;
+    border-radius: 10px;
+}
+
+button {
+    border: none;
+    border-radius: 10px;
+    padding: 13px 20px;
+    margin: 6px;
+    background: #ffcc45;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    touch-action: none;
+}
+
+button:hover {
+    background: #ffe18b;
+}
+
+#message {
+    color: #ffdb64;
+    font-size: 18px;
+    min-height: 24px;
+}
+
+#overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+}
+
+#popup {
+    background: #244252;
+    border: 3px solid #ffcc45;
+    border-radius: 18px;
+    padding: 30px;
+    width: 85%;
+    max-width: 400px;
+}
+
+#popup h2 {
+    color: #ffd54a;
+}
+
+.controls {
+    margin-top: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>⛏️ GOLD MINER</h1>
+
+<div id="info">
+    <span>💰 Tiền: <b id="money">0</b></span>
+    <span>🎯 Mục tiêu: <b id="target">500</b></span>
+    <span>🏆 Bàn: <b id="level">1</b></span>
+    <span>⏰ Thời gian: <b id="time">60</b>s</span>
+</div>
+
+<canvas id="game" width="800" height="500"></canvas>
+
+<div class="controls">
+    <button id="left">⬅️ TRÁI</button>
+    <button id="drop">⛏️ THẢ MÓC</button>
+    <button id="right">PHẢI ➡️</button>
+</div>
+
+<button onclick="restart()">🔄 CHƠI LẠI TỪ ĐẦU</button>
+
+<p id="message">Di chuyển xe và thu thập vàng!</p>
+
+<div id="overlay">
+    <div id="popup">
+        <h2 id="popupTitle">🎉 QUA MÀN!</h2>
+        <p id="popupText">Bạn đã hoàn thành màn chơi!</p>
+        <button id="continueBtn" onclick="continueGame()">
+            BÀN TIẾP THEO ➡️
+        </button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const W = 800;
+const H = 500;
+
+let money = 0;
+let level = 1;
+let target = 500;
+let time = 60;
+
+let running = false;
+let gameState = "playing";
+
+let player = {
+    x: 400,
+    speed: 5
+};
+
+let hook = {
+    length: 0,
+    state: "rotate",
+    angle: 0,
+    dropAngle: 0,
+    item: null
+};
+
+let direction = 1;
+
+const MIN_ANGLE = -1.15;
+const MAX_ANGLE = 1.15;
+const ROTATE_SPEED = 0.01;
+
+let objects = [];
+
+let keys = {
+    left: false,
+    right: false
+};
+
+let timer = null;
+let raf = null;
+let lastFrame = 0;
+
+// Tạo vật phẩm
+function createObjects() {
+    objects = [];
+
+    let number = Math.min(12 + level * 2, 30);
+
+    for (let i = 0; i < number; i++) {
+        let random = Math.random();
+
+        let type;
+
+        if (random < 0.50) {
+            type = "gold";
+        } else if (random < 0.70) {
+            type = "diamond";
+        } else if (random < 0.85) {
+            type = "bag";
+        } else {
+            type = "rock";
+        }
+
+        let obj = {
+            x: 40 + Math.random() * 720,
+            y: 345 + Math.random() * 125,
+            type: type,
+            size: 15 + Math.random() * 8
+        };
+
+        obj.value = {
+            gold: 100,
+            diamond: 250,
+            bag: 150,
+            rock: 20
+        }[type];
+
+        objects.push(obj);
+    }
+}
+
+// Vẽ nền
+function drawBackground() {
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.fillStyle = "#a36c31";
+    ctx.fillRect(0, 320, W, 180);
+
+    ctx.fillStyle = "#805022";
+
+    for (let i = 0; i < W; i += 40) {
+        ctx.fillRect(i, 350 + (i % 3) * 15, 12, 5);
+    }
+
+    // Hiển thị số bàn
+    ctx.fillStyle = "#68451f";
+    ctx.font = "bold 22px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText("LEVEL " + level, 20, 35);
+}
+
+// Vẽ xe
+function drawPlayer() {
+    ctx.fillStyle = "#d48a26";
+    ctx.fillRect(player.x - 45, 40, 90, 35);
+
+    ctx.fillStyle = "#fbd34e";
+    ctx.fillRect(player.x - 25, 46, 50, 15);
+
+    ctx.fillStyle = "#333";
+
+    ctx.beginPath();
+    ctx.arc(player.x - 25, 78, 9, 0, Math.PI * 2);
+    ctx.arc(player.x + 25, 78, 9, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// Vẽ vật phẩm
+function drawObjects() {
+    const emoji = {
+        gold: "🪙",
+        diamond: "💎",
+        bag: "💰",
+        rock: "🪨"
+    };
+
+    objects.forEach(o => {
+        ctx.font = (o.size * 2) + "px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(emoji[o.type], o.x, o.y);
+    });
+}
+
+// Tọa độ đầu móc
+function getHookPosition() {
+    if (hook.state === "rotate") {
+        return {
+            x: player.x + Math.sin(hook.angle) * 180,
+            y: 90 + Math.cos(hook.angle) * 180
+        };
+    }
+
+    return {
+        x: player.x + Math.sin(hook.dropAngle) * hook.length,
+        y: 90 + Math.cos(hook.dropAngle) * hook.length
+    };
+}
+
+// Vẽ móc
+function drawHook() {
+    const pos = getHookPosition();
+
+    ctx.strokeStyle = "#444";
+    ctx.lineWidth = 4;
+
+    ctx.beginPath();
+    ctx.moveTo(player.x, 75);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+
+    // Đầu móc
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    ctx.lineTo(pos.x + 12, pos.y + 12);
+    ctx.lineTo(pos.x + 22, pos.y + 5);
+    ctx.stroke();
+
+    // Vật phẩm đang kéo
+    if (hook.item) {
+        const emoji = {
+            gold: "🪙",
+            diamond: "💎",
+            bag: "💰",
+            rock: "🪨"
+        };
+
+        ctx.font = "30px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(emoji[hook.item.type], pos.x, pos.y + 25);
+    }
+}
+
+// Điều khiển góc quay
+function updateRotation() {
+    hook.angle += ROTATE_SPEED * direction;
+
+    if (hook.angle >= MAX_ANGLE) {
+        hook.angle = MAX_ANGLE;
+        direction = -1;
+    }
+
+    if (hook.angle <= MIN_ANGLE) {
+        hook.angle = MIN_ANGLE;
+        direction = 1;
+    }
+}
+
+// Cập nhật game
+function update() {
+    if (!running) return;
+
+    // Xe và móc quay
+    if (hook.state === "rotate") {
+        if (keys.left) player.x -= player.speed;
+        if (keys.right) player.x += player.speed;
+
+        player.x = Math.max(50, Math.min(750, player.x));
+
+        updateRotation();
+    }
+
+    // Móc đi xuống
+    if (hook.state === "down") {
+        hook.length += 5;
+
+        const pos = getHookPosition();
+
+        let hit = objects.find(o => {
+            return Math.hypot(
+                o.x - pos.x,
+                o.y - pos.y
+            ) < o.size + 12;
+        });
+
+        if (hit) {
+            hook.item = hit;
+            objects = objects.filter(o => o !== hit);
+            hook.state = "up";
+        }
+
+        if (hook.length >= 650) {
+            hook.state = "up";
+        }
+    }
+
+    // Móc kéo lên
+    if (hook.state === "up") {
+        let speed = hook.item && hook.item.type === "rock"
+            ? 1.5 : 4;
+
+        hook.length -= speed;
+
+        if (hook.length <= 0) {
+            hook.length = 0;
+
+            if (hook.item) {
+                money += hook.item.value;
+                hook.item = null;
+
+                updateInfo();
+            }
+
+            hook.state = "rotate";
+
+            // Kiểm tra đạt mục tiêu
+            if (money >= target) {
+                winLevel();
+                return;
+            }
+        }
+    }
+}
+
+// Cập nhật thông tin
+function updateInfo() {
+    document.getElementById("money").textContent = money;
+    document.getElementById("target").textContent = target;
+    document.getElementById("level").textContent = level;
+    document.getElementById("time").textContent = time;
+}
+
+// Vòng lặp game
+function gameLoop(timestamp) {
+    if (!running) return;
+
+    update();
+
+    drawBackground();
+    drawObjects();
+    drawPlayer();
+    drawHook();
+
+    raf = requestAnimationFrame(gameLoop);
+}
+
+// Thả móc
+function dropHook() {
+    if (!running || hook.state !== "rotate") return;
+
+    // Lưu chính xác hướng hiện tại
+    hook.dropAngle = hook.angle;
+
+    hook.length = 0;
+    hook.state = "down";
+}
+
+// Bắt đầu bộ đếm thời gian
+function startTimer() {
+    clearInterval(timer);
+
+    timer = setInterval(() => {
+        if (!running) return;
+
+        time--;
+        updateInfo();
+
+        if (time <= 0) {
+            endGame();
+        }
+    }, 1000);
+}
+
+// Qua màn
+function winLevel() {
+    if (!running) return;
+
+    running = false;
+    gameState = "levelComplete";
+
+    clearInterval(timer);
+    cancelAnimationFrame(raf);
+
+    document.getElementById("popupTitle").textContent =
+        "🎉 HOÀN THÀNH BÀN " + level + "!";
+
+    document.getElementById("popupText").textContent =
+        "Bạn đã đạt " + money +
+        " điểm. Chuẩn bị bước sang bàn " + (level + 1) + "!";
+
+    document.getElementById("continueBtn").style.display = "inline-block";
+
+    document.getElementById("overlay").style.display = "flex";
+
+    document.getElementById("message").textContent =
+        "🎉 Chúc mừng! Bạn đã qua bàn " + level;
+}
+
+// Chuyển sang bàn tiếp theo
+function continueGame() {
+    if (gameState !== "levelComplete") return;
+
+    level++;
+
+    // Mỗi bàn tăng thêm 500
+    target += 500;
+
+    // Tạo vật phẩm mới
+    createObjects();
+
+    // Đặt lại xe
+    player.x = 400;
+
+    // Đặt lại móc
+    hook = {
+        length: 0,
+        state: "rotate",
+        angle: 0,
+        dropAngle: 0,
+        item: null
+    };
+
+    direction = 1;
+
+    // Đặt lại thời gian
+    time = 60;
+
+    keys.left = false;
+    keys.right = false;
+
+    gameState = "playing";
+    running = true;
+
+    document.getElementById("overlay").style.display = "none";
+
+    document.getElementById("message").textContent =
+        "🏆 BÀN " + level + " - Tiếp tục đào vàng!";
+
+    updateInfo();
+
+    lastFrame = 0;
+    gameLoop();
+    startTimer();
+}
+
+// Hết giờ
+function endGame() {
+    if (!running) return;
+
+    running = false;
+    gameState = "gameOver";
+
+    clearInterval(timer);
+    cancelAnimationFrame(raf);
+
+    document.getElementById("popupTitle").textContent =
+        "⏰ HẾT GIỜ!";
+
+    document.getElementById("popupText").textContent =
+        "Bạn đã đạt " + money +
+        " điểm và dừng ở bàn " + level + ".";
+
+    document.getElementById("continueBtn").style.display = "none";
+    document.getElementById("overlay").style.display = "flex";
+
+    document.getElementById("message").textContent =
+        "Hãy thử lại để chinh phục nhiều bàn hơn!";
+}
+
+// Chơi lại từ đầu
+function restart() {
+    clearInterval(timer);
+    cancelAnimationFrame(raf);
+
+    money = 0;
+    level = 1;
+    target = 500;
+    time = 60;
+
+    player.x = 400;
+
+    hook = {
+        length: 0,
+        state: "rotate",
+        angle: 0,
+        dropAngle: 0,
+        item: null
+    };
+
+    direction = 1;
+
+    keys.left = false;
+    keys.right = false;
+
+    gameState = "playing";
+    running = true;
+
+    createObjects();
+
+    document.getElementById("overlay").style.display = "none";
+    document.getElementById("message").textContent =
+        "Bắt đầu đào vàng!";
+
+    updateInfo();
+
+    lastFrame = 0;
+    gameLoop();
+    startTimer();
+}
+
+// Bàn phím
+document.addEventListener("keydown", e => {
+    if (e.code === "ArrowLeft" || e.code === "KeyA") {
+        keys.left = true;
+    }
+
+    if (e.code === "ArrowRight" || e.code === "KeyD") {
+        keys.right = true;
+    }
+
+    if (e.code === "Space") {
+        e.preventDefault();
+        dropHook();
+    }
+});
+
+document.addEventListener("keyup", e => {
+    if (e.code === "ArrowLeft" || e.code === "KeyA") {
+        keys.left = false;
+    }
+
+    if (e.code === "ArrowRight" || e.code === "KeyD") {
+        keys.right = false;
+    }
+});
+
+// Nút điều khiển cảm ứng
+function bindMove(id, key) {
+    const btn = document.getElementById(id);
+
+    btn.addEventListener("pointerdown", e => {
+        e.preventDefault();
+        keys[key] = true;
+        btn.setPointerCapture(e.pointerId);
+    });
+
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(event => {
+        btn.addEventListener(event, () => {
+            keys[key] = false;
+        });
+    });
+}
+
+bindMove("left", "left");
+bindMove("right", "right");
+
+document.getElementById("drop").addEventListener("click", dropHook);
+
+// Khởi động game
+createObjects();
+updateInfo();
+running = true;
+gameLoop();
+startTimer();
+
+</script>
+
+</body>
+</html>
